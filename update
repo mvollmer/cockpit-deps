@@ -1,0 +1,118 @@
+#! /usr/bin/python
+
+# update srcdir   --  Update package in SRCDIR.
+
+# TODO
+#
+# - Actually remove obsolete packages
+
+import sys
+import subprocess
+import ast
+import glob
+import os
+
+mockdir = "result"
+
+def repo_cmd (cmd, config):
+    return subprocess.check_call([ "/bin/sh", "-c", "cd %s && (%s)" % (config['repodir'], cmd) ])
+
+def repo_output (cmd, config):
+    return subprocess.check_output([ "/bin/sh", "-c", "cd %s && (%s)" % (config['repodir'], cmd) ])
+
+def repo_install (file, config):
+    subprocess.check_call([ "cp", file,"%s/%s" % (config['repodir'], os.path.basename (file)) ])
+
+def list_repo (config):
+    return repo_output("ls --sort=time", config).splitlines()
+
+def pkgname (file):
+    return '-'.join(os.path.basename(file).split('-')[:-2])
+
+def pkgarch (file):
+    return os.path.basename(file).split('.')[-2]
+
+def spec_param (spec, param, config):
+    for l in open(spec, "r").read().splitlines():
+        l = l.strip()
+        if l.startswith(param + ":"):
+            v = l[len(param)+1:].strip()
+            if "macros" in config:
+                m = config["macros"]
+                for k in m:
+                    v = v.replace ("%%{?%s}" % k, m[k])
+            return v
+    return None
+
+def srcpkg_filename (spec, config):
+    name = spec_param (spec, "Name", config)
+    version = spec_param (spec, "Version", config)
+    release = spec_param (spec, "Release", config)
+    return name + "-" + version + "-" + release + ".src.rpm"
+
+def upload (files, config, repo_files):
+    for f in files:
+        print f
+        for r in repo_files:
+            if pkgname(r) == pkgname(f) and pkgarch(r) == pkgarch(f):
+                print "Obsolete version: %s" % r
+        repo_install (f, config)
+    repo_cmd ("createrepo .", config)
+
+def snarf_output_filenames(out):
+    res = [ ];
+    for l in out.splitlines():
+        if l.startswith ("Wrote: "):
+            res.append(os.path.basename(l[7:]))
+    return res
+
+def rpm_src_pack (spec):
+    dir = os.path.dirname (spec)
+    out = subprocess.check_output ([ "rpmbuild", "-bs",
+                                     "--define", "_sourcedir %s" % dir,
+                                     "--define", "_specdir %s" % dir,
+                                     "--define", "_srcrpmdir %s" % mockdir,
+                                     spec ])
+    files = snarf_output_filenames (out)
+    assert len(files) == 1
+    return mockdir + "/" + files[0]
+
+def update_package (spec, config, repo_files):
+    src = srcpkg_filename (spec, config)
+    if src in repo_files:
+        print "%s is up-to-date" % src
+        return
+    subprocess.check_call ([ "rm", "-rf", mockdir ])
+    os.mkdir (mockdir)
+    srpm = rpm_src_pack (spec)
+    subprocess.check_call ([ "mock",
+                             "--configdir", os.path.dirname (os.path.dirname(spec)),
+                             "--root", config['mockconfig'],
+                             "--resultdir", mockdir,
+                             srpm ])
+    files = snarf_output_filenames (open("%s/build.log" % mockdir, "r").read())
+    upload (map (lambda f: mockdir + "/" + f, files), config, repo_files)
+
+def update_src (src):
+    if src.endswith("/"):
+        src = src[:-1]
+    config_file = os.path.dirname(src) + "/config"
+    if os.path.isfile(config_file):
+        config = ast.literal_eval(open(os.path.dirname(src) + "/config").read())
+        for c in config:
+            repo_files = list_repo(c)
+            if src.endswith(".rpm"):
+                if os.path.basename(src) in repo_files:
+                    print "%s is up-to-date" % src
+                else:
+                    upload ([ src ], c, repo_files)
+            else:
+                specs = glob.glob (src + "/*.spec")
+                for s in specs:
+                    update_package (s, c, repo_files)
+    elif os.path.isdir(src):
+        for e in os.listdir(src):
+            update_src (src + "/" + e)
+
+for a in sys.argv[1:]:
+    update_src (a)

@@ -1,0 +1,7 @@
+These are the sources and binaries for some unreleased dependencies of
+Cockpit.
+
+To build and upload a new package, use the "update" program in this
+directory.  For example:
+
+   $ ./update fedora-20/accountsservice

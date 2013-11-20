@@ -1,0 +1,15 @@
+<html>
+  <body>
+    <h1>Unreleased Cockpit dependencies</h1>
+
+    <h2>Fedora</h2>
+    Put this into <tt>/etc/yum.repos.d/cockpit-deps.repo</tt>:
+    <pre>
+[cockpit-deps]
+name=Unreleased Cockpit dependencies
+baseurl=http://cockpit-project.org/cockpit-deps/fedora-$releasever/$basearch
+enabled=0
+gpgcheck=0
+    </pre>
+  </body>
+</html>

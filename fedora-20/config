@@ -1,0 +1,5 @@
+[ { 'repodir':    "fedora-20/x86_64",
+    'mockconfig': "default",
+    'macros':     { 'dist' : ".fc20" },
+  }
+]
