@@ -9,4 +9,4 @@ For example:
 This will install new binary packages in the right place somewhere in
 this directory tree and will update the repository metadata.
 
-The review the changes, commit, and push.
+Then review the changes, commit, and push.
