@@ -2,7 +2,7 @@
 
 Name:           accountsservice
 Version:        0.6.35
-Release:        2%{?dist}mvo1
+Release:        3%{?dist}mvo1
 Summary:        D-Bus interfaces for querying and manipulating user account information
 
 Group:          System Environment/Daemons
@@ -10,7 +10,8 @@ License:        GPLv3+
 URL:            http://www.fedoraproject.org/wiki/Features/UserAccountDialog
 #VCS: git:git://git.freedesktop.org/accountsservice
 Source0:        http://www.freedesktop.org/software/accountsservice/accountsservice-%{version}.tar.xz
-Patch0:         0001-Manage-group-membership.patch
+Patch0: fix-user-classification.patch
+Patch1:         0001-Manage-group-membership.patch
 
 BuildRequires:  glib2-devel
 BuildRequires:  dbus-glib-devel
@@ -57,7 +58,8 @@ of these interfaces, based on the useradd, usermod and userdel commands.
 
 %prep
 %setup -q
-%patch0 -p1
+%patch0 -p1 -b .fix-user-classification
+%patch1 -p1
 
 %build
 %configure --enable-user-heuristics
@@ -111,7 +113,11 @@ rm $RPM_BUILD_ROOT%{_libdir}/*.a
 %{_datadir}/gtk-doc/html/libaccountsservice/*
 
 %changelog
-* Mon Nov 11 2013 Ray Strode <rstrode@redhat.com> 0.6.35-1
+* Wed Nov 20 2013 Ray Strode <rstrode@redhat.com> 0.6.35-3
+- Only treat users < 1000 as system users
+- only use user heuristics on the range 500-1000
+
+* Mon Nov 11 2013 Ray Strode <rstrode@redhat.com> 0.6.35-2
 - pass --enable-user-heuristics which fedora needs so users
   with UIDs less than 1000 show up in the user list.
 

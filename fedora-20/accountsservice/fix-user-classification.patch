@@ -1,0 +1,377 @@
+From ba13b59cb91ec67c86b3e3fb390d91db01df8963 Mon Sep 17 00:00:00 2001
+From: Ray Strode <rstrode@redhat.com>
+Date: Fri, 15 Nov 2013 10:11:15 -0500
+Subject: [PATCH] Change up user classification logic again
+
+relying on login.defs is fragile, and the
+user heuristics are fragile.
+
+This commit requires an explicit uid minimum
+get configured, and heuristics now only get
+applied to the specific problematic range
+they were added to address.
+
+https://bugs.freedesktop.org/show_bug.cgi?id=71801
+---
+ configure.ac        |   8 +++-
+ src/user-classify.c | 129 ++++++++++------------------------------------------
+ 2 files changed, 32 insertions(+), 105 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index cb1fcda..39c5b92 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -28,65 +28,71 @@ AC_SUBST(LT_AGE)
+ PKG_CHECK_MODULES(GIO, gio-2.0 >= 2.37.3 gio-unix-2.0)
+ PKG_CHECK_MODULES(POLKIT, gio-unix-2.0 polkit-gobject-1)
+ 
+ AM_MAINTAINER_MODE([enable])
+ 
+ # client library dependencies
+ LIBACCOUNTSSERVICE_LIBS="$GIO_LIBS"
+ AC_SUBST(LIBACCOUNTSSERVICE_LIBS)
+ LIBACCOUNTSSERVICE_CFLAGS="$GIO_CFLAGS"
+ AC_SUBST(LIBACCOUNTSSERVICE_CFLAGS)
+ 
+ GOBJECT_INTROSPECTION_CHECK([0.9.12])
+ 
+ dnl ---------------------------------------------------------------------------
+ dnl - Core configuration
+ dnl ---------------------------------------------------------------------------
+ 
+ AC_ARG_ENABLE(admin-group,
+         [AS_HELP_STRING([--enable-admin-group],[Set group for administrative accounts @<:@default=auto@:>@])],
+         ,enable_admin_group=auto)
+ AS_IF([test x$enable_admin_group = xauto], [
+   AC_CHECK_FILE(/etc/redhat-release, enable_admin_group=wheel)
+   AC_CHECK_FILE(/etc/debian_version, enable_admin_group=sudo)
+   AS_IF([test x$enable_admin_group = xauto], [
+     enable_admin_group=wheel
+   ])
+ ])
+ AC_DEFINE_UNQUOTED([ADMIN_GROUP], ["$enable_admin_group"], [Define to the group for administrator users])
+ 
+ AC_ARG_ENABLE(user-heuristics,
+-        [AS_HELP_STRING([--enable-user-heuristics],[Enable heuristics for guessing system vs. human users])],
++        [AS_HELP_STRING([--enable-user-heuristics],[Enable heuristics for guessing system vs. human users in the range 500-minimum-uid])],
+         [if test "$enableval" = yes; then
+            AC_DEFINE([ENABLE_USER_HEURISTICS], , [System vs. human user heuristics enabled])
+         fi])
+ 
++AC_ARG_WITH(minimum-uid,
++        [AS_HELP_STRING([--with-minimum-uid],[Set minimum uid for human users])],
++        ,with_minimum_uid=1000)
++
++AC_DEFINE_UNQUOTED([MINIMUM_UID], $with_minimum_uid, [Define to the minumum UID of human users])
++
+ dnl ---------------------------------------------------------------------------
+ dnl - coverage
+ dnl ---------------------------------------------------------------------------
+ 
+ AC_MSG_CHECKING([whether to build with gcov testing])
+ AC_ARG_ENABLE([coverage],
+               AS_HELP_STRING([--enable-coverage],
+                              [Whether to enable gcov code coverage]),
+               [], [enable_coverage=no])
+ AC_MSG_RESULT([$enable_coverage])
+ 
+ if test "$enable_coverage" = "yes"; then
+ 	if test "$GCC" != "yes"; then
+ 		AC_MSG_ERROR(Coverage testing requires GCC)
+ 	fi
+ 	CFLAGS="$CFLAGS -O0 -g --coverage"
+ fi
+ 
+ AM_CONDITIONAL([WITH_COVERAGE], [test "$enable_coverage" = "yes"])
+ 
+ dnl ---------------------------------------------------------------------------
+ dnl - Warnings
+ dnl ---------------------------------------------------------------------------
+ 
+ AC_ARG_ENABLE(more-warnings,
+               AS_HELP_STRING([--enable-more-warnings],
+                              [Maximum compiler warnings]),
+               set_more_warnings="$enableval",[
+               if test -d $srcdir/.git; then
+                 set_more_warnings=yes
+diff --git a/src/user-classify.c b/src/user-classify.c
+index b68c9ae..69e6809 100644
+--- a/src/user-classify.c
++++ b/src/user-classify.c
+@@ -1,248 +1,169 @@
+ /*
+  * Copyright (C) 2009-2010 Red Hat, Inc.
+  * Copyright (C) 2013 Canonical Limited
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 3 of the licence, or
+  * (at your option) any later version.
+  *
+  * This program is distributed in the hope that it will be useful,
+  * but WITHOUT ANY WARRANTY; without even the implied warranty of
+  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  * GNU General Public License for more details.
+  *
+  * You should have received a copy of the GNU General Public License
+  * along with this program; if not, write to the Free Software
+  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+  *
+  * Authors: Ryan Lortie <desrt@desrt.ca>
+  *          Matthias Clasen <mclasen@redhat.com>
+  */
+ 
+ #include "config.h"
+ 
+ #include "user-classify.h"
+ 
+ #include <string.h>
+ 
+-#ifdef ENABLE_USER_HEURISTICS
+ static const char *default_excludes[] = {
+         "bin",
+         "root",
+         "daemon",
+         "adm",
+         "lp",
+         "sync",
+         "shutdown",
+         "halt",
+         "mail",
+         "news",
+         "uucp",
+         "operator",
+         "nobody",
+         "nobody4",
+         "noaccess",
+         "postgres",
+         "pvm",
+         "rpm",
+         "nfsnobody",
+         "pcap",
+         "mysql",
+         "ftp",
+         "games",
+         "man",
+         "at",
+         "gdm",
+         "gnome-initial-setup"
+ };
+ 
+-#define PATH_NOLOGIN "/sbin/nologin"
+-#define PATH_FALSE "/bin/false"
+-
+ static gboolean
+-user_classify_is_excluded_by_heuristics (const gchar *username,
+-                                         const gchar *shell,
+-                                         const gchar *password_hash)
++user_classify_is_blacklisted (const char *username)
+ {
+         static GHashTable *exclusions;
+-        gboolean ret = FALSE;
+ 
+         if (exclusions == NULL) {
+                 guint i;
+ 
+                 exclusions = g_hash_table_new (g_str_hash, g_str_equal);
+ 
+                 for (i = 0; i < G_N_ELEMENTS (default_excludes); i++) {
+                         g_hash_table_add (exclusions, (gpointer) default_excludes[i]);
+                 }
+         }
+ 
+         if (g_hash_table_contains (exclusions, username)) {
+                 return TRUE;
+         }
+ 
++        return FALSE;
++}
++
++#define PATH_NOLOGIN "/sbin/nologin"
++#define PATH_FALSE "/bin/false"
++
++#ifdef ENABLE_USER_HEURISTICS
++static gboolean
++user_classify_is_excluded_by_heuristics (const gchar *username,
++                                         const gchar *shell,
++                                         const gchar *password_hash)
++{
++        gboolean ret = FALSE;
++
+         if (shell != NULL) {
+                 char *basename, *nologin_basename, *false_basename;
+ 
+ #ifdef HAVE_GETUSERSHELL
+                 char *valid_shell;
+ 
+                 ret = TRUE;
+                 setusershell ();
+                 while ((valid_shell = getusershell ()) != NULL) {
+                         if (g_strcmp0 (shell, valid_shell) != 0)
+                                 continue;
+                         ret = FALSE;
+                 }
+                 endusershell ();
+ #endif
+ 
+                 basename = g_path_get_basename (shell);
+                 nologin_basename = g_path_get_basename (PATH_NOLOGIN);
+                 false_basename = g_path_get_basename (PATH_FALSE);
+ 
+                 if (shell[0] == '\0') {
+                         ret = TRUE;
+                 } else if (g_strcmp0 (basename, nologin_basename) == 0) {
+                         ret = TRUE;
+                 } else if (g_strcmp0 (basename, false_basename) == 0) {
+                         ret = TRUE;
+                 }
+ 
+                 g_free (basename);
+                 g_free (nologin_basename);
+                 g_free (false_basename);
+         }
+ 
+         if (password_hash != NULL) {
+                 /* skip over the account-is-locked '!' prefix if present */
+                 if (password_hash[0] == '!')
+                     password_hash++;
+ 
+                 if (password_hash[0] != '\0') {
+                         /* modern hashes start with "$n$" */
+                         if (password_hash[0] == '$') {
+                                 if (strlen (password_hash) < 4)
+                                     ret = TRUE;
+ 
+                         /* DES crypt is base64 encoded [./A-Za-z0-9]*
+                          */
+                         } else if (!g_ascii_isalnum (password_hash[0]) &&
+                                    password_hash[0] != '.' &&
+                                    password_hash[0] != '/') {
+                                 ret = TRUE;
+                         }
+                 }
+ 
+         }
+ 
+         return ret;
+ }
+-
+-#else /* ENABLE_USER_HEURISTICS */
+-
+-static gboolean
+-user_classify_parse_login_defs_field (const gchar *contents,
+-                                      const gchar *key,
+-                                      uid_t       *result)
+-{
+-        gsize key_len;
+-        gint64 value;
+-        gchar *end;
+-
+-        key_len = strlen (key);
+-
+-        for (;;) {
+-                /* Our key has to be at the start of the line, followed by whitespace */
+-                if (strncmp (contents, key, key_len) == 0 && g_ascii_isspace (contents[key_len])) {
+-                        /* Found it.  Move contents past the key itself and break out. */
+-                        contents += key_len;
+-                        break;
+-                }
+-
+-                /* Didn't find it.  Find the end of the line. */
+-                contents = strchr (contents, '\n');
+-
+-                /* EOF? */
+-                if (!contents) {
+-                        /* We didn't find the field... */
+-                        return FALSE;
+-                }
+-
+-                /* Start at the beginning of the next line on next iteration. */
+-                contents++;
+-        }
+-
+-        /* 'contents' now points at the whitespace character just after
+-         * the field name.  strtoll can deal with that.
+-         */
+-        value = g_ascii_strtoll (contents, &end, 10);
+-
+-        if (*end && !g_ascii_isspace (*end)) {
+-                g_warning ("Trailing junk after '%s' field in login.defs", key);
+-                return FALSE;
+-        }
+-
+-        if (value <= 0 || value >= G_MAXINT32) {
+-                g_warning ("Value for '%s' field out of range", key);
+-                return FALSE;
+-        }
+-
+-        *result = value;
+-
+-        return TRUE;
+-}
+-
+-static void
+-user_classify_read_login_defs (uid_t *min_uid,
+-                               uid_t *max_uid)
+-{
+-        GError *error = NULL;
+-        char *contents;
+-
+-        if (!g_file_get_contents ("/etc/login.defs", &contents, NULL, &error)) {
+-                g_warning ("Could not open /etc/login.defs: %s.  Falling back to default human uid range of %d to %d",
+-                           error->message, (int) *min_uid, (int) *max_uid);
+-                g_error_free (error);
+-                return;
+-        }
+-
+-        if (!user_classify_parse_login_defs_field (contents, "UID_MIN", min_uid)) {
+-                g_warning ("Could not find UID_MIN value in login.defs.  Using default of %d", (int) *min_uid);
+-        }
+-
+-        if (!user_classify_parse_login_defs_field (contents, "UID_MAX", max_uid)) {
+-                g_warning ("Could not find UID_MIN value in login.defs.  Using default of %d", (int) *max_uid);
+-        }
+-
+-        g_free (contents);
+-}
+-
+-static gboolean
+-user_classify_is_in_human_range (uid_t uid)
+-{
+-        static uid_t min_uid = 1000, max_uid = 60000;
+-        static gboolean initialised;
+-
+-        if (!initialised) {
+-                user_classify_read_login_defs (&min_uid, &max_uid);
+-                initialised = TRUE;
+-        }
+-
+-        return min_uid <= uid && uid <= max_uid;
+-}
+ #endif /* ENABLE_USER_HEURISTICS */
+ 
+ gboolean
+ user_classify_is_human (uid_t        uid,
+                         const gchar *username,
+                         const gchar *shell,
+                         const gchar *password_hash)
+ {
++        if (user_classify_is_blacklisted (username))
++                return FALSE;
++
+ #ifdef ENABLE_USER_HEURISTICS
+-        return !user_classify_is_excluded_by_heuristics (username, shell, password_hash);
+-#else
+-        return user_classify_is_in_human_range (uid);
++        /* only do heuristics on the range 500-1000 to catch one off migration problems in Fedora */
++        if (uid >= 500 && uid < MINIMUM_UID) {
++                if (!user_classify_is_excluded_by_heuristics (username, shell, password_hash))
++                        return TRUE;
++        }
+ #endif
++
++        return uid >= MINIMUM_UID;
+ }
+-- 
+1.8.4.2
+
