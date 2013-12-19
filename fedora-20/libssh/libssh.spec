@@ -1,5 +1,5 @@
 Name:           libssh-rc-devel
-Version:        0.6.0rc1
+Version:        0.6.0rc2
 Release:        1%{?dist}
 Summary:        A library implementing the SSH2 protocol (0xbadc0de version)
 License:        LGPLv2+
@@ -7,7 +7,7 @@ URL:            http://www.libssh.org/
 Group:          System Environment/Libraries
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
-Source0:        https://red.libssh.org/attachments/download/52/libssh-0.6.0rc1.tar.gz
+Source0:        https://red.libssh.org/attachments/download/65/libssh-0.6.0rc2.tar.gz
 
 BuildRequires:  cmake
 BuildRequires:  openssl-devel
@@ -89,6 +89,9 @@ rm -rf %{buildroot}
 %{_libdir}/cmake/libssh-config.cmake
 
 %changelog
+* Thu Dec 19 2013 - Marius Vollmer <marius.vollmer@redhat.com> - 0.6-rc2.1
+- Updated to 0.6-rc2.
+
 * Fri Oct 18 2013 - Stef Walter <stefw@redhat.com> - 0.6-rc1.1
 - Forked to be a static rc devel library
 
@@ -170,4 +173,3 @@ rm -rf %{buildroot}
 
 * Mon Jun 01 2009 Jan F. Chadima <jchadima@redhat.com> - 0.2-1
 - Initial build
-
