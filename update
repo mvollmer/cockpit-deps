@@ -113,6 +113,8 @@ def update_src (src):
     elif os.path.isdir(src):
         for e in os.listdir(src):
             update_src (src + "/" + e)
+    else:
+        print "Ignoring unrecognized argument '%s'" % (src, )
 
 for a in sys.argv[1:]:
     update_src (a)
