@@ -1,6 +1,6 @@
 Name:           storaged
 Version:        0.2.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Extended storage management DBus service
 
 # The daemon and tools are licensed under the GPLv2 (or later) and libraries are
