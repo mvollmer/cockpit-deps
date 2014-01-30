@@ -1,6 +1,6 @@
 Name:           storaged
 Version:        0.2.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Extended storage management DBus service
 
 # The daemon and tools are licensed under the GPLv2 (or later) and libraries are
@@ -52,20 +52,20 @@ make %{?_smp_mflags}
 %doc %{_mandir}/man8/storaged.8.gz
 %{_unitdir}/storaged.service
 %{_libdir}/%{name}
-%{_sysconfdir}/dbus-1/system.d/com.redhat.lvm2.conf
+%{_sysconfdir}/dbus-1/system.d/com.redhat.storaged.conf
 %{_datadir}/dbus-1/interfaces/com.redhat.lvm2.xml
-%{_datadir}/dbus-1/system-services/com.redhat.lvm2.service
+%{_datadir}/dbus-1/system-services/com.redhat.storaged.service
 %{_datadir}/polkit-1/actions/com.redhat.lvm2.policy
 
 
 %post
-%systemd_post com.redhat.lvm2.service
+%systemd_post com.redhat.storaged.service
 
 %preun
-%systemd_preun com.redhat.lvm2.service
+%systemd_preun com.redhat.storaged.service
 
 %postun
-%systemd_postun_with_restart com.redhat.lvm2.service
+%systemd_postun_with_restart com.redhat.storaged.service
 
 
 %changelog
